@@ -37,7 +37,7 @@ class IslandPlugin(Plugin):
         for server in self.config.servers.values():
             for cid, cfg in server['channels'].items():
                 self.messages[cid] = defaultdict(int)
-                self.vote_messages[cid] = defaultdict(set)
+                self.vote_messages[cid] = set()
                 self.spawn(self.loop, cid, cfg)
 
     @Plugin.pre_command()
@@ -140,7 +140,12 @@ class IslandPlugin(Plugin):
         gevent.sleep(10)
 
         # Delete all the messages sent by people when voting
-        channel.delete_messages_bulk(self.vote_messages[channel.id])
+        try:
+            channel.delete_messages_bulk(self.vote_messages[channel.id])
+        except:
+            pass
+
+        self.vote_messages[channel.id] = set()
 
         # Stop the voting and tally
         votes = self.votes.pop(channel.id)
