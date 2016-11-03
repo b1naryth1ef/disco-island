@@ -1,0 +1,8 @@
+servers:
+  41771983423143937:
+    channels:
+      41771983423143937:
+        interval: 360
+        vote_time: 90
+        pool_size: 5
+        need_messages: 10

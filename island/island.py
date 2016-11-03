@@ -7,6 +7,11 @@ import time
 from collections import defaultdict
 
 from disco.bot import Plugin, Config
+from disco.bot.command import CommandLevels
+from disco.types.message import MessageTable
+
+
+ZERO_WIDTH_SPACE = u'\u200B'
 
 
 def weighted_random(obj):
@@ -26,10 +31,10 @@ class IslandPluginConfig(Config):
 
 @Plugin.with_config(IslandPluginConfig)
 class IslandPlugin(Plugin):
-    def load(self):
-        super(IslandPlugin, self).load()
+    def load(self, ctx):
+        super(IslandPlugin, self).load(ctx)
 
-        self.messages = {}
+        self.messages = ctx.get('messages', {})
         self.next_vote = {}
         self.votes = {}
         self.vote_messages = {}
@@ -40,17 +45,9 @@ class IslandPlugin(Plugin):
                 self.vote_messages[cid] = set()
                 self.spawn(self.loop, cid, cfg)
 
-    @Plugin.pre_command()
-    def pre_command(self, event, args, kwargs):
-        if not event.msg.guild or event.msg.guild.id not in self.config.servers:
-            return
-
-        member = event.msg.guild.get_member(event.msg.author)
-
-        if not set(member.roles) & set(self.config.admin_roles):
-            return
-
-        return event
+    def unload(self, ctx):
+        ctx['messages'] = self.messages
+        super(IslandPlugin, self).unload(ctx)
 
     def get_channel_for_message(self, event):
         if event.channel.id not in self.messages:
@@ -60,7 +57,7 @@ class IslandPlugin(Plugin):
                 return self.state.channels.get(self.config.servers[event.guild.id]['channels'].keys()[0])
         return self.state.channels.get(event.channel.id)
 
-    @Plugin.command('status')
+    @Plugin.command('status', level=CommandLevels.OWNER)
     def status(self, event):
         channel = self.get_channel_for_message(event)
         if not channel:
@@ -72,7 +69,7 @@ class IslandPlugin(Plugin):
             int(self.next_vote[channel.id] - time.time())
         ))
 
-    @Plugin.command('vote [size:int] [time:int]')
+    @Plugin.command('vote', '[size:int] [time:int]', level=CommandLevels.OWNER)
     def vote(self, event, size=None, time=None):
         channel = self.get_channel_for_message(event)
         if not channel:
@@ -83,6 +80,18 @@ class IslandPlugin(Plugin):
         self.next_vote[channel.id] = time.time() + config['interval']
         self.process_vote(channel.id, time or config['vote_time'], size or config['pool_size'])
 
+    @Plugin.command('roles', level=CommandLevels.TRUSTED)
+    def roles(self, event):
+        if not event.guild:
+            return
+
+        tbl = MessageTable()
+        tbl.set_header('ID', 'Role Name', 'Perms')
+        for role in event.guild.roles.values():
+            tbl.add(role.id, role.name.replace('@', '@' + ZERO_WIDTH_SPACE), role.permissions.value)
+
+        event.msg.reply(tbl.compile())
+
     @Plugin.listen('MessageCreate')
     def on_message_create(self, event):
         if event.author.id == self.state.me.id or event.channel.id not in self.messages:
@@ -90,14 +99,15 @@ class IslandPlugin(Plugin):
 
         if event.channel.id in self.votes:
             if event.mentions and event.without_mentions == '':
-                for mention in event.mentions:
+                for mention in event.mentions.values():
                     member = event.channel.guild.get_member(mention)
                     if member in self.votes[event.channel.id]:
                         self.votes[event.channel.id][member].add(event.author.id)
                         self.vote_messages[event.channel.id].add(event.message)
         else:
             member = event.channel.guild.get_member(event.author)
-            roles = set(self.config.servers[event.channel.guild.id]['ignore_roles'])
+
+            roles = set(self.config.servers[event.channel.guild.id].get('ignore_roles', []))
             if roles & set(member.roles) or member.owner:
                 return
 
@@ -155,7 +165,7 @@ class IslandPlugin(Plugin):
             channel.send_message(':exclamation: NO VOTES - ENGAGING EMERGENCY PURGE PROTOCOL :exclamation:')
             member = random.choice(votes.keys())
         else:
-            member = max(votes.items(), key=lambda i: i[1])[0]
+            member = max(votes.items(), key=lambda i: len(i[1]))[0]
 
         channel.send_message(':pray: Any last words for {}? :pray:'.format(member.mention))
         gevent.sleep(5)
